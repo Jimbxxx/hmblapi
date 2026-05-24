@@ -1,0 +1,130 @@
+{
+    "1": {
+        "name": "brighton",
+        "division": "PREMIER LEAGUE",
+        "manager": "<@505736478341726221>",
+        "co_managers": [],
+        "stats": {
+            "played": 0,
+            "wins": 0,
+            "draws": 0,
+            "losses": 0,
+            "gf": 0,
+            "ga": 0,
+            "gd": 0,
+            "points": 0
+        }
+    },
+    "2": {
+        "name": "wrexham",
+        "division": "PREMIER LEAGUE",
+        "manager": "<@1422976994173255843>",
+        "co_managers": [],
+        "stats": {
+            "played": 0,
+            "wins": 0,
+            "draws": 0,
+            "losses": 0,
+            "gf": 0,
+            "ga": 0,
+            "gd": 0,
+            "points": 0
+        }
+    },
+    "3": {
+        "name": "marseille",
+        "division": "PREMIER LEAGUE",
+        "manager": "<@1296870345000615996>",
+        "co_managers": [],
+        "stats": {
+            "played": 0,
+            "wins": 0,
+            "draws": 0,
+            "losses": 0,
+            "gf": 0,
+            "ga": 0,
+            "gd": 0,
+            "points": 0
+        }
+    },
+    "4": {
+        "name": "no fuck u",
+        "division": "PREMIER LEAGUE",
+        "manager": "<@1236017770076962927>",
+        "co_managers": [],
+        "stats": {
+            "played": 0,
+            "wins": 0,
+            "draws": 0,
+            "losses": 0,
+            "gf": 0,
+            "ga": 0,
+            "gd": 0,
+            "points": 0
+        }
+    },
+    "5": {
+        "name": "fortnite",
+        "division": "PREMIER LEAGUE",
+        "manager": "<@1388471071124230249>",
+        "co_managers": [],
+        "stats": {
+            "played": 0,
+            "wins": 0,
+            "draws": 0,
+            "losses": 0,
+            "gf": 0,
+            "ga": 0,
+            "gd": 0,
+            "points": 0
+        }
+    },
+    "6": {
+        "name": "gta 6",
+        "division": "PREMIER LEAGUE",
+        "manager": "<@1480990711448076328>",
+        "co_managers": [],
+        "stats": {
+            "played": 0,
+            "wins": 0,
+            "draws": 0,
+            "losses": 0,
+            "gf": 0,
+            "ga": 0,
+            "gd": 0,
+            "points": 0
+        }
+    },
+    "7": {
+        "name": "next name",
+        "division": "PREMIER LEAGUE",
+        "manager": "<@1394752495388987554>",
+        "co_managers": [],
+        "stats": {
+            "played": 0,
+            "wins": 0,
+            "draws": 0,
+            "losses": 0,
+            "gf": 0,
+            "ga": 0,
+            "gd": 0,
+            "points": 0
+        }
+    },
+    "8": {
+        "name": "jude smells",
+        "division": "PREMIER LEAGUE",
+        "manager": "<@1300074010813399050>",
+        "co_managers": [],
+        "stats": {
+            "played": 0,
+            "wins": 0,
+            "draws": 0,
+            "losses": 0,
+            "gf": 0,
+            "ga": 0,
+            "gd": 0,
+            "points": 0
+        }
+    }
+}
