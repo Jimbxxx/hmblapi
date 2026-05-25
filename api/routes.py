@@ -1,30 +1,29 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Header
 from supabase import create_client
 from dotenv import load_dotenv
 import os
 import requests
 import jwt
 from datetime import datetime, timedelta
-from fastapi import Request
 from fastapi.responses import RedirectResponse
-
 
 load_dotenv()
 
 router = APIRouter()
 
 # =========================
-# SUPABASE
+# ENV
 # =========================
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
 DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
 DISCORD_REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI")
 JWT_SECRET = os.getenv("JWT_SECRET")
+FRONTEND_URL = os.getenv("FRONTEND_URL")
+
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 # =========================
@@ -32,10 +31,7 @@ JWT_SECRET = os.getenv("JWT_SECRET")
 # =========================
 @router.get("/")
 def home():
-    return {
-        "name": "HMBL API",
-        "status": "online"
-    }
+    return {"name": "HMBL API", "status": "online"}
 
 
 # =========================
@@ -47,6 +43,7 @@ def debug():
         "url": SUPABASE_URL,
         "key_ok": bool(SUPABASE_KEY)
     }
+
 
 # =========================
 # DISCORD LOGIN
@@ -64,71 +61,63 @@ def discord_login():
 
     return RedirectResponse(url)
 
+
 # =========================
-# DISCORD CALLBACK
+# DISCORD CALLBACK (FIXED)
 # =========================
 @router.get("/auth/discord/callback")
 def discord_callback(code: str):
 
     try:
-
-        token_data = {
-            "client_id": DISCORD_CLIENT_ID,
-            "client_secret": DISCORD_CLIENT_SECRET,
-            "grant_type": "authorization_code",
-            "code": code,
-            "redirect_uri": DISCORD_REDIRECT_URI,
-            "scope": "identify"
-        }
-
-        headers = {
-            "Content-Type": "application/x-www-form-urlencoded"
-        }
-
+        # exchange code
         token_res = requests.post(
             "https://discord.com/api/oauth2/token",
-            data=token_data,
-            headers=headers
+            data={
+                "client_id": DISCORD_CLIENT_ID,
+                "client_secret": DISCORD_CLIENT_SECRET,
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": DISCORD_REDIRECT_URI,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"}
         )
 
         token_json = token_res.json()
-
         access_token = token_json.get("access_token")
 
         if not access_token:
-            return {
-                "status": "error",
-                "discord_response": token_json
-            }
+            return RedirectResponse(f"{FRONTEND_URL}/?error=oauth_failed")
 
+        # get discord user
         user_res = requests.get(
             "https://discord.com/api/users/@me",
-            headers={
-                "Authorization": f"Bearer {access_token}"
-            }
+            headers={"Authorization": f"Bearer {access_token}"}
         )
 
         user = user_res.json()
 
-        discord_id = user["id"]
-        username_raw = user["username"]
+        discord_id = user.get("id")
+        username_raw = user.get("username", "user")
         avatar = user.get("avatar")
+
+        if not discord_id:
+            return RedirectResponse(f"{FRONTEND_URL}/?error=user_failed")
 
         avatar_url = (
             f"https://cdn.discordapp.com/avatars/{discord_id}/{avatar}.png"
             if avatar else None
         )
 
+        # check player
         existing = supabase.table("players") \
-            .select("*") \
+            .select("discord_id, username") \
             .eq("discord_id", discord_id) \
             .execute()
 
         if not existing.data:
-
             hmbl_username = f"{username_raw.lower()}_{discord_id[-4:]}"
 
-            insert = supabase.table("players").insert({
+            supabase.table("players").insert({
                 "discord_id": discord_id,
                 "username": hmbl_username,
                 "pfp": avatar_url,
@@ -140,12 +129,10 @@ def discord_callback(code: str):
                 "team_id": None,
                 "position": None
             }).execute()
-
-            print(insert)
-
         else:
             hmbl_username = existing.data[0]["username"]
 
+        # JWT
         token = jwt.encode(
             {
                 "discord_id": discord_id,
@@ -156,23 +143,15 @@ def discord_callback(code: str):
             algorithm="HS256"
         )
 
-        frontend = os.getenv("FRONTEND_URL")
-
-        return RedirectResponse(
-            url=f"{frontend}/?token={token}"
-        )
+        return RedirectResponse(f"{FRONTEND_URL}/?token={token}")
 
     except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e)
-        }
+        return RedirectResponse(f"{FRONTEND_URL}/?error=server_error")
+
 
 # =========================
-# DISCORD LOGIN CHECK
+# AUTH ME
 # =========================
-from fastapi import Header, HTTPException
-
 @router.get("/auth/me")
 def get_me(authorization: str = Header(None)):
 
@@ -182,11 +161,7 @@ def get_me(authorization: str = Header(None)):
     try:
         token = authorization.replace("Bearer ", "")
         data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-
-        return {
-            "status": "success",
-            "user": data
-        }
+        return {"status": "success", "user": data}
 
     except:
         return {"status": "error", "message": "invalid token"}
@@ -201,45 +176,52 @@ def update_profile(payload: dict, authorization: str = Header(None)):
     if not authorization:
         return {"status": "error", "message": "missing token"}
 
-    token = authorization.replace("Bearer ", "")
-    data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    try:
+        token = authorization.replace("Bearer ", "")
+        data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
 
-    discord_id = data["discord_id"]
+        discord_id = data["discord_id"]
 
-    username = payload.get("username")
-    position = payload.get("position")
+        username = payload.get("username")
+        position = payload.get("position")
 
-    if not username:
-        return {"status": "error", "message": "missing username"}
+        if not username:
+            return {"status": "error", "message": "missing username"}
 
-    supabase.table("players").update({
-        "username": username,
-        "position": position
-    }).eq("discord_id", discord_id).execute()
+        supabase.table("players") \
+            .update({
+                "username": username,
+                "position": position
+            }) \
+            .eq("discord_id", discord_id) \
+            .execute()
 
-    return {"status": "success"}
+        return {"status": "success"}
+
+    except:
+        return {"status": "error", "message": "invalid token"}
 
 
 # =========================
-# INCREMENT VIEW
+# INCREMENT VIEW (OPTIMISED)
 # =========================
 @router.post("/players/increment-view")
 def increment_view(payload: dict):
 
     username = payload.get("username")
-
     if not username:
         return {"status": "error"}
 
     player = supabase.table("players") \
-        .select("*") \
+        .select("profile_views") \
         .eq("username", username) \
+        .single() \
         .execute()
 
     if not player.data:
         return {"status": "error"}
 
-    current = player.data[0].get("profile_views", 0)
+    current = player.data.get("profile_views", 0)
 
     supabase.table("players") \
         .update({"profile_views": current + 1}) \
@@ -250,17 +232,29 @@ def increment_view(payload: dict):
 
 
 # =========================
+# GET PLAYERS (FAST)
+# =========================
+@router.get("/players")
+def get_players():
+    res = supabase.table("players").select("*").execute()
+
+    return {
+        "status": "success",
+        "data": {str(p["id"]): p for p in (res.data or [])}
+    }
+
+
+# =========================
 # GET TEAMS
 # =========================
 @router.get("/teams")
 def get_teams():
-    response = supabase.table("teams").select("*").execute()
+    res = supabase.table("teams").select("*").execute()
 
-    teams = {}
-    for team in response.data or []:
-        teams[str(team["id"])] = team
-
-    return {"status": "success", "data": teams}
+    return {
+        "status": "success",
+        "data": {str(t["id"]): t for t in (res.data or [])}
+    }
 
 
 # =========================
@@ -268,27 +262,12 @@ def get_teams():
 # =========================
 @router.get("/divisions")
 def get_divisions():
-    response = supabase.table("divisions").select("*").execute()
+    res = supabase.table("divisions").select("*").execute()
 
-    divisions = {}
-    for div in response.data or []:
-        divisions[div["name"]] = div
-
-    return {"status": "success", "data": divisions}
-
-
-# =========================
-# GET PLAYERS
-# =========================
-@router.get("/players")
-def get_players():
-    response = supabase.table("players").select("*").execute()
-
-    players = {}
-    for player in response.data or []:
-        players[str(player["id"])] = player
-
-    return {"status": "success", "data": players}
+    return {
+        "status": "success",
+        "data": {d["name"]: d for d in (res.data or [])}
+    }
 
 
 # =========================
@@ -296,13 +275,12 @@ def get_players():
 # =========================
 @router.get("/matches")
 def get_matches():
-    response = supabase.table("matches").select("*").execute()
+    res = supabase.table("matches").select("*").execute()
 
-    matches = {}
-    for match in response.data or []:
-        matches[str(match["id"])] = match
-
-    return {"status": "success", "data": matches}
+    return {
+        "status": "success",
+        "data": {str(m["id"]): m for m in (res.data or [])}
+    }
 
 
 # =========================
@@ -352,18 +330,13 @@ def delete_division(payload: dict):
 
     name = name.upper()
 
-    existing = supabase.table("divisions").select("name").eq("name", name).execute()
-
-    if not existing.data:
-        return {"status": "error", "message": "Not found"}
-
     supabase.table("divisions").delete().eq("name", name).execute()
 
     return {"status": "success", "message": "Deleted"}
 
 
 # =========================
-# UPDATE DIVISION (SAFE)
+# UPDATE DIVISION
 # =========================
 @router.post("/divisions/update")
 def update_division(payload: dict):
@@ -425,24 +398,19 @@ def create_team(payload: dict):
         }
     }).execute()
 
-    if not insert_res.data:
-        return {"status": "error", "message": "Insert failed"}
-
     team_id = str(insert_res.data[0]["id"])
 
-    # attach to division
     div_res = supabase.table("divisions").select("*").eq("name", division).execute()
 
     if div_res.data:
-        div = div_res.data[0]
-        teams = div.get("teams", [])
-
+        teams = div_res.data[0].get("teams", [])
         if team_id not in teams:
             teams.append(team_id)
 
-        supabase.table("divisions").update({
-            "teams": teams
-        }).eq("name", division).execute()
+        supabase.table("divisions") \
+            .update({"teams": teams}) \
+            .eq("name", division) \
+            .execute()
 
     return {"status": "success", "team_id": team_id}
 
@@ -469,17 +437,16 @@ def delete_team(payload: dict):
     div_res = supabase.table("divisions").select("*").eq("name", division).execute()
 
     if div_res.data:
-        div = div_res.data[0]
-        teams = div.get("teams", [])
+        teams = div_res.data[0].get("teams", [])
 
         if str(team_id) in teams:
             teams.remove(str(team_id))
 
-        supabase.table("divisions").update({
-            "teams": teams
-        }).eq("name", division).execute()
+        supabase.table("divisions") \
+            .update({"teams": teams}) \
+            .eq("name", division) \
+            .execute()
 
     supabase.table("teams").delete().eq("id", team_id).execute()
-
 
     return {"status": "success", "message": "Deleted"}
