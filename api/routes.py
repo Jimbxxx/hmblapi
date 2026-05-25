@@ -70,88 +70,103 @@ def discord_login():
 @router.get("/auth/discord/callback")
 def discord_callback(code: str):
 
-    token_data = {
-        "client_id": DISCORD_CLIENT_ID,
-        "client_secret": DISCORD_CLIENT_SECRET,
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": DISCORD_REDIRECT_URI,
-        "scope": "identify"
-    }
+    try:
 
-    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        token_data = {
+            "client_id": DISCORD_CLIENT_ID,
+            "client_secret": DISCORD_CLIENT_SECRET,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": DISCORD_REDIRECT_URI,
+            "scope": "identify"
+        }
 
-    token_res = requests.post(
-        "https://discord.com/api/oauth2/token",
-        data=token_data,
-        headers=headers
-    )
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
 
-    token_json = token_res.json()
-    access_token = token_json.get("access_token")
+        token_res = requests.post(
+            "https://discord.com/api/oauth2/token",
+            data=token_data,
+            headers=headers
+        )
 
-    if not access_token:
-        return RedirectResponse(f"{os.getenv('FRONTEND_URL')}/?error=oauth_failed")
+        token_json = token_res.json()
 
-    user_res = requests.get(
-        "https://discord.com/api/users/@me",
-        headers={"Authorization": f"Bearer {access_token}"}
-    )
+        access_token = token_json.get("access_token")
 
-    user = user_res.json()
+        if not access_token:
+            return {
+                "status": "error",
+                "discord_response": token_json
+            }
 
-    discord_id = user["id"]
-    username_raw = user["username"]
-    avatar = user.get("avatar")
+        user_res = requests.get(
+            "https://discord.com/api/users/@me",
+            headers={
+                "Authorization": f"Bearer {access_token}"
+            }
+        )
 
-    avatar_url = (
-        f"https://cdn.discordapp.com/avatars/{discord_id}/{avatar}.png"
-        if avatar else None
-    )
+        user = user_res.json()
 
-    # check/create player
-    existing = supabase.table("players") \
-        .select("*") \
-        .eq("discord_id", discord_id) \
-        .execute()
+        discord_id = user["id"]
+        username_raw = user["username"]
+        avatar = user.get("avatar")
 
-    if not existing.data:
+        avatar_url = (
+            f"https://cdn.discordapp.com/avatars/{discord_id}/{avatar}.png"
+            if avatar else None
+        )
 
-        hmbl_username = f"{username_raw.lower()}_{discord_id[-4:]}"
+        existing = supabase.table("players") \
+            .select("*") \
+            .eq("discord_id", discord_id) \
+            .execute()
 
-        supabase.table("players").insert({
-            "discord_id": discord_id,
-            "username": hmbl_username,
-            "pfp": avatar_url,
-            "points": 0,
-            "goals": 0,
-            "assists": 0,
-            "clean_sheets": 0,
-            "profile_views": 0,
-            "team_id": None,
-            "position": None
-        }).execute()
+        if not existing.data:
 
-    else:
-        hmbl_username = existing.data[0]["username"]
+            hmbl_username = f"{username_raw.lower()}_{discord_id[-4:]}"
 
-    # JWT
-    token = jwt.encode(
-        {
-            "discord_id": discord_id,
-            "username": hmbl_username,
-            "exp": datetime.utcnow() + timedelta(days=7)
-        },
-        JWT_SECRET,
-        algorithm="HS256"
-    )
+            insert = supabase.table("players").insert({
+                "discord_id": discord_id,
+                "username": hmbl_username,
+                "pfp": avatar_url,
+                "points": 0,
+                "goals": 0,
+                "assists": 0,
+                "clean_sheets": 0,
+                "profile_views": 0,
+                "team_id": None,
+                "position": None
+            }).execute()
 
-    frontend = os.getenv("FRONTEND_URL")
+            print(insert)
 
-    # REDIRECT BACK TO WEBSITE
-    return RedirectResponse(
-        url=f"{frontend}/?token={token}"
-    )
+        else:
+            hmbl_username = existing.data[0]["username"]
+
+        token = jwt.encode(
+            {
+                "discord_id": discord_id,
+                "username": hmbl_username,
+                "exp": datetime.utcnow() + timedelta(days=7)
+            },
+            JWT_SECRET,
+            algorithm="HS256"
+        )
+
+        frontend = os.getenv("FRONTEND_URL")
+
+        return RedirectResponse(
+            url=f"{frontend}/?token={token}"
+        )
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 # =========================
 # DISCORD LOGIN CHECK
