@@ -1,6 +1,9 @@
 from fastapi import APIRouter
 from supabase import create_client
+from dotenv import load_dotenv
 import os
+
+load_dotenv()
 
 router = APIRouter()
 
@@ -29,12 +32,11 @@ def home():
 # =========================
 @router.get("/teams")
 def get_teams():
-
     response = supabase.table("teams").select("*").execute()
 
     teams = {}
 
-    for team in response.data:
+    for team in response.data or []:
         teams[str(team["id"])] = team
 
     return {
@@ -48,12 +50,11 @@ def get_teams():
 # =========================
 @router.get("/divisions")
 def get_divisions():
-
     response = supabase.table("divisions").select("*").execute()
 
     divisions = {}
 
-    for div in response.data:
+    for div in response.data or []:
         divisions[div["name"]] = div
 
     return {
@@ -67,12 +68,11 @@ def get_divisions():
 # =========================
 @router.get("/players")
 def get_players():
-
     response = supabase.table("players").select("*").execute()
 
     players = {}
 
-    for player in response.data:
+    for player in response.data or []:
         players[str(player["id"])] = player
 
     return {
@@ -86,12 +86,11 @@ def get_players():
 # =========================
 @router.get("/matches")
 def get_matches():
-
     response = supabase.table("matches").select("*").execute()
 
     matches = {}
 
-    for match in response.data:
+    for match in response.data or []:
         matches[str(match["id"])] = match
 
     return {
@@ -110,30 +109,17 @@ def create_division(payload: dict):
     max_teams = payload.get("max_teams", 0)
 
     if not name:
-        return {
-            "status": "error",
-            "message": "Missing name"
-        }
+        return {"status": "error", "message": "Missing name"}
 
     name = name.upper()
 
-    existing = (
-        supabase
-        .table("divisions")
-        .select("*")
-        .eq("name", name)
-        .execute()
-    )
+    existing = supabase.table("divisions").select("name").eq("name", name).execute()
 
     if existing.data:
-        return {
-            "status": "error",
-            "message": "Division exists"
-        }
+        return {"status": "error", "message": "Division exists"}
 
-    tier = len(
-        supabase.table("divisions").select("*").execute().data
-    ) + 1
+    all_divs = supabase.table("divisions").select("name").execute().data or []
+    tier = len(all_divs) + 1
 
     supabase.table("divisions").insert({
         "name": name,
@@ -144,10 +130,7 @@ def create_division(payload: dict):
         "fixtures": {}
     }).execute()
 
-    return {
-        "status": "success",
-        "message": "Division created"
-    }
+    return {"status": "success", "message": "Division created"}
 
 
 # =========================
@@ -159,37 +142,22 @@ def delete_division(payload: dict):
     name = payload.get("name")
 
     if not name:
-        return {
-            "status": "error",
-            "message": "Missing name"
-        }
+        return {"status": "error", "message": "Missing name"}
 
     name = name.upper()
 
-    existing = (
-        supabase
-        .table("divisions")
-        .select("*")
-        .eq("name", name)
-        .execute()
-    )
+    existing = supabase.table("divisions").select("name").eq("name", name).execute()
 
     if not existing.data:
-        return {
-            "status": "error",
-            "message": "Not found"
-        }
+        return {"status": "error", "message": "Not found"}
 
     supabase.table("divisions").delete().eq("name", name).execute()
 
-    return {
-        "status": "success",
-        "message": "Deleted"
-    }
+    return {"status": "success", "message": "Deleted"}
 
 
 # =========================
-# UPDATE DIVISION
+# UPDATE DIVISION (SAFE)
 # =========================
 @router.post("/divisions/update")
 def update_division(payload: dict):
@@ -198,19 +166,28 @@ def update_division(payload: dict):
     data = payload.get("data")
 
     if not name or not data:
-        return {
-            "status": "error",
-            "message": "Missing fields"
-        }
+        return {"status": "error", "message": "Missing fields"}
 
     name = name.upper()
 
-    supabase.table("divisions").update(data).eq("name", name).execute()
+    # SAFE FIELD UPDATE ONLY (prevents overwriting entire row incorrectly)
+    update_data = {}
 
-    return {
-        "status": "success",
-        "message": "Updated"
-    }
+    allowed_fields = [
+        "tier",
+        "max_teams",
+        "teams",
+        "current_gameweek",
+        "fixtures"
+    ]
+
+    for field in allowed_fields:
+        if field in data:
+            update_data[field] = data[field]
+
+    supabase.table("divisions").update(update_data).eq("name", name).execute()
+
+    return {"status": "success", "message": "Updated"}
 
 
 # =========================
@@ -225,14 +202,11 @@ def create_team(payload: dict):
     color = payload.get("color", 0xf39c12)
 
     if not all([name, division, manager]):
-        return {
-            "status": "error",
-            "message": "Missing fields"
-        }
+        return {"status": "error", "message": "Missing fields"}
 
     division = division.upper()
 
-    team_insert = supabase.table("teams").insert({
+    insert_res = supabase.table("teams").insert({
         "name": name,
         "division": division,
         "manager": manager,
@@ -250,35 +224,28 @@ def create_team(payload: dict):
         }
     }).execute()
 
-    created_team = team_insert.data[0]
-    team_id = created_team["id"]
+    if not insert_res.data:
+        return {"status": "error", "message": "Insert failed"}
+
+    created_team = insert_res.data[0]
+    team_id = str(created_team["id"])
 
     # attach to division
-    div_res = (
-        supabase
-        .table("divisions")
-        .select("*")
-        .eq("name", division)
-        .execute()
-    )
+    div_res = supabase.table("divisions").select("*").eq("name", division).execute()
 
     if div_res.data:
-
         div = div_res.data[0]
 
         teams = div.get("teams", [])
 
-        if str(team_id) not in teams:
-            teams.append(str(team_id))
+        if team_id not in teams:
+            teams.append(team_id)
 
         supabase.table("divisions").update({
             "teams": teams
         }).eq("name", division).execute()
 
-    return {
-        "status": "success",
-        "team_id": str(team_id)
-    }
+    return {"status": "success", "team_id": team_id}
 
 
 # =========================
@@ -290,40 +257,20 @@ def delete_team(payload: dict):
     team_id = payload.get("team_id")
 
     if not team_id:
-        return {
-            "status": "error",
-            "message": "Missing team_id"
-        }
+        return {"status": "error", "message": "Missing team_id"}
 
-    team_res = (
-        supabase
-        .table("teams")
-        .select("*")
-        .eq("id", int(team_id))
-        .execute()
-    )
+    team_res = supabase.table("teams").select("*").eq("id", team_id).execute()
 
     if not team_res.data:
-        return {
-            "status": "error",
-            "message": "Not found"
-        }
+        return {"status": "error", "message": "Not found"}
 
     team = team_res.data[0]
-
-    division = team["division"]
+    division = team["division"].upper()
 
     # remove from division
-    div_res = (
-        supabase
-        .table("divisions")
-        .select("*")
-        .eq("name", division)
-        .execute()
-    )
+    div_res = supabase.table("divisions").select("*").eq("name", division).execute()
 
     if div_res.data:
-
         div = div_res.data[0]
 
         teams = div.get("teams", [])
@@ -336,9 +283,6 @@ def delete_team(payload: dict):
         }).eq("name", division).execute()
 
     # delete team
-    supabase.table("teams").delete().eq("id", int(team_id)).execute()
+    supabase.table("teams").delete().eq("id", team_id).execute()
 
-    return {
-        "status": "success",
-        "message": "Deleted"
-    }
+    return {"status": "success", "message": "Deleted"}
