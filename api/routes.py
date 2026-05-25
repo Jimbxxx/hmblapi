@@ -221,6 +221,35 @@ def update_profile(payload: dict, authorization: str = Header(None)):
 
 
 # =========================
+# INCREMENT VIEW
+# =========================
+@router.post("/players/increment-view")
+def increment_view(payload: dict):
+
+    username = payload.get("username")
+
+    if not username:
+        return {"status": "error"}
+
+    player = supabase.table("players") \
+        .select("*") \
+        .eq("username", username) \
+        .execute()
+
+    if not player.data:
+        return {"status": "error"}
+
+    current = player.data[0].get("profile_views", 0)
+
+    supabase.table("players") \
+        .update({"profile_views": current + 1}) \
+        .eq("username", username) \
+        .execute()
+
+    return {"status": "success"}
+
+
+# =========================
 # GET TEAMS
 # =========================
 @router.get("/teams")
