@@ -1,28 +1,16 @@
 from fastapi import APIRouter
-import json
+from supabase import create_client
 import os
 
 router = APIRouter()
 
-DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "data")
-
-
 # =========================
-# FILE HELPERS
+# SUPABASE
 # =========================
-def load_json(file):
-    path = os.path.join(DATA_PATH, file)
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except:
-        return {}
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-
-def save_json(file, data):
-    path = os.path.join(DATA_PATH, file)
-    with open(path, "w") as f:
-        json.dump(data, f, indent=4)
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 # =========================
@@ -37,125 +25,216 @@ def home():
 
 
 # =========================
-# GET DATA
+# GET TEAMS
 # =========================
 @router.get("/teams")
 def get_teams():
-    return {"status": "success", "data": load_json("teams.json")}
 
+    response = supabase.table("teams").select("*").execute()
 
-@router.get("/players")
-def get_players():
-    return {"status": "success", "data": load_json("players.json")}
+    teams = {}
 
+    for team in response.data:
+        teams[str(team["id"])] = team
 
-@router.get("/matches")
-def get_matches():
-    return {"status": "success", "data": load_json("matches.json")}
-
-
-@router.get("/divisions")
-def get_divisions():
-    return {"status": "success", "data": load_json("divisions.json")}
+    return {
+        "status": "success",
+        "data": teams
+    }
 
 
 # =========================
-# DIVISIONS
+# GET DIVISIONS
+# =========================
+@router.get("/divisions")
+def get_divisions():
+
+    response = supabase.table("divisions").select("*").execute()
+
+    divisions = {}
+
+    for div in response.data:
+        divisions[div["name"]] = div
+
+    return {
+        "status": "success",
+        "data": divisions
+    }
+
+
+# =========================
+# GET PLAYERS
+# =========================
+@router.get("/players")
+def get_players():
+
+    response = supabase.table("players").select("*").execute()
+
+    players = {}
+
+    for player in response.data:
+        players[str(player["id"])] = player
+
+    return {
+        "status": "success",
+        "data": players
+    }
+
+
+# =========================
+# GET MATCHES
+# =========================
+@router.get("/matches")
+def get_matches():
+
+    response = supabase.table("matches").select("*").execute()
+
+    matches = {}
+
+    for match in response.data:
+        matches[str(match["id"])] = match
+
+    return {
+        "status": "success",
+        "data": matches
+    }
+
+
+# =========================
+# CREATE DIVISION
 # =========================
 @router.post("/divisions/create")
 def create_division(payload: dict):
-
-    data = load_json("divisions.json")
 
     name = payload.get("name")
     max_teams = payload.get("max_teams", 0)
 
     if not name:
-        return {"status": "error", "message": "Missing name"}
+        return {
+            "status": "error",
+            "message": "Missing name"
+        }
 
     name = name.upper()
 
-    if name in data:
-        return {"status": "error", "message": "Division exists"}
+    existing = (
+        supabase
+        .table("divisions")
+        .select("*")
+        .eq("name", name)
+        .execute()
+    )
 
-    data[name] = {
+    if existing.data:
+        return {
+            "status": "error",
+            "message": "Division exists"
+        }
+
+    tier = len(
+        supabase.table("divisions").select("*").execute().data
+    ) + 1
+
+    supabase.table("divisions").insert({
         "name": name,
-        "tier": len(data) + 1,
+        "tier": tier,
         "max_teams": max_teams,
         "teams": [],
         "current_gameweek": 1,
         "fixtures": {}
+    }).execute()
+
+    return {
+        "status": "success",
+        "message": "Division created"
     }
-
-    save_json("divisions.json", data)
-
-    return {"status": "success", "message": "Division created"}
-
-
-@router.post("/divisions/delete")
-def delete_division(payload: dict):
-
-    data = load_json("divisions.json")
-
-    name = payload.get("name")
-    if not name:
-        return {"status": "error", "message": "Missing name"}
-
-    name = name.upper()
-
-    if name not in data:
-        return {"status": "error", "message": "Not found"}
-
-    del data[name]
-
-    save_json("divisions.json", data)
-
-    return {"status": "success", "message": "Deleted"}
-
-
-@router.post("/divisions/update")
-def update_division(payload: dict):
-
-    data = load_json("divisions.json")
-
-    name = payload.get("division")
-    new_data = payload.get("data")
-
-    if not name or not new_data:
-        return {"status": "error", "message": "Missing fields"}
-
-    name = name.upper()
-
-    data[name] = new_data
-
-    save_json("divisions.json", data)
-
-    return {"status": "success", "message": "Updated"}
 
 
 # =========================
-# TEAMS
+# DELETE DIVISION
+# =========================
+@router.post("/divisions/delete")
+def delete_division(payload: dict):
+
+    name = payload.get("name")
+
+    if not name:
+        return {
+            "status": "error",
+            "message": "Missing name"
+        }
+
+    name = name.upper()
+
+    existing = (
+        supabase
+        .table("divisions")
+        .select("*")
+        .eq("name", name)
+        .execute()
+    )
+
+    if not existing.data:
+        return {
+            "status": "error",
+            "message": "Not found"
+        }
+
+    supabase.table("divisions").delete().eq("name", name).execute()
+
+    return {
+        "status": "success",
+        "message": "Deleted"
+    }
+
+
+# =========================
+# UPDATE DIVISION
+# =========================
+@router.post("/divisions/update")
+def update_division(payload: dict):
+
+    name = payload.get("division")
+    data = payload.get("data")
+
+    if not name or not data:
+        return {
+            "status": "error",
+            "message": "Missing fields"
+        }
+
+    name = name.upper()
+
+    supabase.table("divisions").update(data).eq("name", name).execute()
+
+    return {
+        "status": "success",
+        "message": "Updated"
+    }
+
+
+# =========================
+# CREATE TEAM
 # =========================
 @router.post("/teams/create")
 def create_team(payload: dict):
 
-    teams = load_json("teams.json")
-    divisions = load_json("divisions.json")
-
     name = payload.get("name")
     division = payload.get("division")
     manager = payload.get("manager")
-
     color = payload.get("color", 0xf39c12)
 
     if not all([name, division, manager]):
-        return {"status": "error", "message": "Missing fields"}
+        return {
+            "status": "error",
+            "message": "Missing fields"
+        }
 
-    team_id = str(int(max(teams.keys(), default="0")) + 1)
+    division = division.upper()
 
-    teams[team_id] = {
+    team_insert = supabase.table("teams").insert({
         "name": name,
-        "division": division.upper(),
+        "division": division,
         "manager": manager,
         "co_managers": [],
         "color": color,
@@ -169,43 +248,97 @@ def create_team(payload: dict):
             "gd": 0,
             "points": 0
         }
+    }).execute()
+
+    created_team = team_insert.data[0]
+    team_id = created_team["id"]
+
+    # attach to division
+    div_res = (
+        supabase
+        .table("divisions")
+        .select("*")
+        .eq("name", division)
+        .execute()
+    )
+
+    if div_res.data:
+
+        div = div_res.data[0]
+
+        teams = div.get("teams", [])
+
+        if str(team_id) not in teams:
+            teams.append(str(team_id))
+
+        supabase.table("divisions").update({
+            "teams": teams
+        }).eq("name", division).execute()
+
+    return {
+        "status": "success",
+        "team_id": str(team_id)
     }
 
-    # attach to division safely
-    div_name = division.upper()
-    if div_name in divisions:
-        divisions[div_name].setdefault("teams", [])
-        if team_id not in divisions[div_name]["teams"]:
-            divisions[div_name]["teams"].append(team_id)
 
-    save_json("teams.json", teams)
-    save_json("divisions.json", divisions)
-
-    return {"status": "success", "team_id": team_id}
-
-
+# =========================
+# DELETE TEAM
+# =========================
 @router.post("/teams/delete")
 def delete_team(payload: dict):
 
-    teams = load_json("teams.json")
-    divisions = load_json("divisions.json")
-
     team_id = payload.get("team_id")
 
-    if not team_id or team_id not in teams:
-        return {"status": "error", "message": "Not found"}
+    if not team_id:
+        return {
+            "status": "error",
+            "message": "Missing team_id"
+        }
 
-    team = teams[team_id]
+    team_res = (
+        supabase
+        .table("teams")
+        .select("*")
+        .eq("id", int(team_id))
+        .execute()
+    )
 
-    div_name = team.get("division", "").upper()
+    if not team_res.data:
+        return {
+            "status": "error",
+            "message": "Not found"
+        }
 
-    if div_name in divisions:
-        if team_id in divisions[div_name].get("teams", []):
-            divisions[div_name]["teams"].remove(team_id)
+    team = team_res.data[0]
 
-    del teams[team_id]
+    division = team["division"]
 
-    save_json("teams.json", teams)
-    save_json("divisions.json", divisions)
+    # remove from division
+    div_res = (
+        supabase
+        .table("divisions")
+        .select("*")
+        .eq("name", division)
+        .execute()
+    )
 
-    return {"status": "success", "message": "Deleted"}
+    if div_res.data:
+
+        div = div_res.data[0]
+
+        teams = div.get("teams", [])
+
+        if str(team_id) in teams:
+            teams.remove(str(team_id))
+
+        supabase.table("divisions").update({
+            "teams": teams
+        }).eq("name", division).execute()
+
+    # delete team
+    supabase.table("teams").delete().eq("id", int(team_id)).execute()
+
+    return {
+        "status": "success",
+        "message": "Deleted"
+    }
