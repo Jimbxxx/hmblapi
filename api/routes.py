@@ -193,6 +193,34 @@ def get_me(authorization: str = Header(None)):
 
 
 # =========================
+# UPDATE PROFILE
+# =========================
+@router.post("/players/update-profile")
+def update_profile(payload: dict, authorization: str = Header(None)):
+
+    if not authorization:
+        return {"status": "error", "message": "missing token"}
+
+    token = authorization.replace("Bearer ", "")
+    data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+
+    discord_id = data["discord_id"]
+
+    username = payload.get("username")
+    position = payload.get("position")
+
+    if not username:
+        return {"status": "error", "message": "missing username"}
+
+    supabase.table("players").update({
+        "username": username,
+        "position": position
+    }).eq("discord_id", discord_id).execute()
+
+    return {"status": "success"}
+
+
+# =========================
 # GET TEAMS
 # =========================
 @router.get("/teams")
