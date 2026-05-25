@@ -49,10 +49,11 @@ def debug():
     }
 
 # =========================
-# DISCORD LOGIN 
+# DISCORD LOGIN
 # =========================
 @router.get("/auth/discord/login")
 def discord_login():
+
     url = (
         "https://discord.com/api/oauth2/authorize"
         f"?client_id={DISCORD_CLIENT_ID}"
@@ -69,7 +70,6 @@ def discord_login():
 @router.get("/auth/discord/callback")
 def discord_callback(code: str):
 
-    # exchange code for token
     token_data = {
         "client_id": DISCORD_CLIENT_ID,
         "client_secret": DISCORD_CLIENT_SECRET,
@@ -91,9 +91,8 @@ def discord_callback(code: str):
     access_token = token_json.get("access_token")
 
     if not access_token:
-        return {"status": "error", "message": "No access token"}
+        return RedirectResponse(f"{os.getenv('FRONTEND_URL')}/?error=oauth_failed")
 
-    # get discord user
     user_res = requests.get(
         "https://discord.com/api/users/@me",
         headers={"Authorization": f"Bearer {access_token}"}
@@ -110,7 +109,7 @@ def discord_callback(code: str):
         if avatar else None
     )
 
-    # check if player exists
+    # check/create player
     existing = supabase.table("players") \
         .select("*") \
         .eq("discord_id", discord_id) \
@@ -118,13 +117,17 @@ def discord_callback(code: str):
 
     if not existing.data:
 
-        # create HMBL username (first login system)
         hmbl_username = f"{username_raw.lower()}_{discord_id[-4:]}"
 
         supabase.table("players").insert({
             "discord_id": discord_id,
             "username": hmbl_username,
             "pfp": avatar_url,
+            "points": 0,
+            "goals": 0,
+            "assists": 0,
+            "clean_sheets": 0,
+            "profile_views": 0,
             "team_id": None,
             "position": None
         }).execute()
@@ -132,7 +135,7 @@ def discord_callback(code: str):
     else:
         hmbl_username = existing.data[0]["username"]
 
-    # create JWT session
+    # JWT
     token = jwt.encode(
         {
             "discord_id": discord_id,
@@ -143,25 +146,32 @@ def discord_callback(code: str):
         algorithm="HS256"
     )
 
-    return {
-        "status": "success",
-        "token": token,
-        "user": {
-            "discord_id": discord_id,
-            "username": hmbl_username,
-            "avatar": avatar_url
-        }
-    }
+    frontend = os.getenv("FRONTEND_URL")
+
+    # REDIRECT BACK TO WEBSITE
+    return RedirectResponse(
+        url=f"{frontend}/?token={token}"
+    )
 
 # =========================
 # DISCORD LOGIN CHECK
 # =========================
+from fastapi import Header, HTTPException
+
 @router.get("/auth/me")
-def get_me(token: str):
+def get_me(authorization: str = Header(None)):
+
+    if not authorization:
+        return {"status": "error", "message": "missing token"}
 
     try:
+        token = authorization.replace("Bearer ", "")
         data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        return {"status": "success", "user": data}
+
+        return {
+            "status": "success",
+            "user": data
+        }
 
     except:
         return {"status": "error", "message": "invalid token"}
