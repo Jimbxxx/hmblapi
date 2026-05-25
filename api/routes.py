@@ -27,6 +27,14 @@ def home():
     }
 
 
+@router.get("/debug-supabase")
+def debug():
+    return {
+        "url": SUPABASE_URL,
+        "key_start": SUPABASE_KEY[:10]
+    }
+
+
 # =========================
 # GET TEAMS
 # =========================
