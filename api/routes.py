@@ -6,6 +6,8 @@ import requests
 import jwt
 from datetime import datetime, timedelta
 from fastapi import Request
+from fastapi.responses import RedirectResponse
+
 
 load_dotenv()
 
@@ -59,7 +61,7 @@ def discord_login():
         f"&redirect_uri={DISCORD_REDIRECT_URI}"
     )
 
-    return {"url": url}
+    return RedirectResponse(url)
 
 # =========================
 # DISCORD CALLBACK
