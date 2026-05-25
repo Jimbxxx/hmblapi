@@ -27,11 +27,14 @@ def home():
     }
 
 
+# =========================
+# DEBUG
+# =========================
 @router.get("/debug-supabase")
 def debug():
     return {
         "url": SUPABASE_URL,
-        "key_start": SUPABASE_KEY[:10]
+        "key_ok": bool(SUPABASE_KEY)
     }
 
 
@@ -43,14 +46,10 @@ def get_teams():
     response = supabase.table("teams").select("*").execute()
 
     teams = {}
-
     for team in response.data or []:
         teams[str(team["id"])] = team
 
-    return {
-        "status": "success",
-        "data": teams
-    }
+    return {"status": "success", "data": teams}
 
 
 # =========================
@@ -61,14 +60,10 @@ def get_divisions():
     response = supabase.table("divisions").select("*").execute()
 
     divisions = {}
-
     for div in response.data or []:
         divisions[div["name"]] = div
 
-    return {
-        "status": "success",
-        "data": divisions
-    }
+    return {"status": "success", "data": divisions}
 
 
 # =========================
@@ -79,14 +74,10 @@ def get_players():
     response = supabase.table("players").select("*").execute()
 
     players = {}
-
     for player in response.data or []:
         players[str(player["id"])] = player
 
-    return {
-        "status": "success",
-        "data": players
-    }
+    return {"status": "success", "data": players}
 
 
 # =========================
@@ -97,14 +88,10 @@ def get_matches():
     response = supabase.table("matches").select("*").execute()
 
     matches = {}
-
     for match in response.data or []:
         matches[str(match["id"])] = match
 
-    return {
-        "status": "success",
-        "data": matches
-    }
+    return {"status": "success", "data": matches}
 
 
 # =========================
@@ -178,20 +165,15 @@ def update_division(payload: dict):
 
     name = name.upper()
 
-    # SAFE FIELD UPDATE ONLY (prevents overwriting entire row incorrectly)
+    allowed_fields = ["tier", "max_teams", "teams", "current_gameweek", "fixtures"]
+
     update_data = {}
-
-    allowed_fields = [
-        "tier",
-        "max_teams",
-        "teams",
-        "current_gameweek",
-        "fixtures"
-    ]
-
     for field in allowed_fields:
         if field in data:
             update_data[field] = data[field]
+
+    if not update_data:
+        return {"status": "error", "message": "No valid fields"}
 
     supabase.table("divisions").update(update_data).eq("name", name).execute()
 
@@ -235,15 +217,13 @@ def create_team(payload: dict):
     if not insert_res.data:
         return {"status": "error", "message": "Insert failed"}
 
-    created_team = insert_res.data[0]
-    team_id = str(created_team["id"])
+    team_id = str(insert_res.data[0]["id"])
 
     # attach to division
     div_res = supabase.table("divisions").select("*").eq("name", division).execute()
 
     if div_res.data:
         div = div_res.data[0]
-
         teams = div.get("teams", [])
 
         if team_id not in teams:
@@ -275,12 +255,10 @@ def delete_team(payload: dict):
     team = team_res.data[0]
     division = team["division"].upper()
 
-    # remove from division
     div_res = supabase.table("divisions").select("*").eq("name", division).execute()
 
     if div_res.data:
         div = div_res.data[0]
-
         teams = div.get("teams", [])
 
         if str(team_id) in teams:
@@ -290,7 +268,6 @@ def delete_team(payload: dict):
             "teams": teams
         }).eq("name", division).execute()
 
-    # delete team
     supabase.table("teams").delete().eq("id", team_id).execute()
 
     return {"status": "success", "message": "Deleted"}
