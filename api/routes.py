@@ -69,7 +69,6 @@ def discord_login():
 def discord_callback(code: str):
 
     try:
-        # exchange code
         token_res = requests.post(
             "https://discord.com/api/oauth2/token",
             data={
@@ -88,7 +87,6 @@ def discord_callback(code: str):
         if not access_token:
             return RedirectResponse(f"{FRONTEND_URL}/?error=oauth_failed")
 
-        # get discord user
         user_res = requests.get(
             "https://discord.com/api/users/@me",
             headers={"Authorization": f"Bearer {access_token}"}
@@ -108,13 +106,14 @@ def discord_callback(code: str):
             if avatar else None
         )
 
-        # check player
         existing = supabase.table("players") \
-            .select("discord_id, username") \
+            .select("discord_id, username, position") \
             .eq("discord_id", discord_id) \
             .execute()
 
-        if not existing.data:
+        is_new_user = not existing.data
+
+        if is_new_user:
             hmbl_username = f"{username_raw.lower()}_{discord_id[-4:]}"
 
             supabase.table("players").insert({
@@ -132,20 +131,22 @@ def discord_callback(code: str):
         else:
             hmbl_username = existing.data[0]["username"]
 
-        # JWT
         token = jwt.encode(
             {
                 "discord_id": discord_id,
                 "username": hmbl_username,
+                "is_new": is_new_user,
                 "exp": datetime.utcnow() + timedelta(days=7)
             },
             JWT_SECRET,
             algorithm="HS256"
         )
 
-        return RedirectResponse(f"{FRONTEND_URL}/?token={token}")
+        return RedirectResponse(
+            f"{FRONTEND_URL}/?token={token}&new={str(is_new_user).lower()}"
+        )
 
-    except Exception as e:
+    except Exception:
         return RedirectResponse(f"{FRONTEND_URL}/?error=server_error")
 
 
@@ -161,10 +162,50 @@ def get_me(authorization: str = Header(None)):
     try:
         token = authorization.replace("Bearer ", "")
         data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        return {"status": "success", "user": data}
+
+        # pull full profile from DB (IMPORTANT for profile page)
+        player = supabase.table("players") \
+            .select("*") \
+            .eq("discord_id", data["discord_id"]) \
+            .single() \
+            .execute()
+
+        return {
+            "status": "success",
+            "user": data,
+            "profile": player.data
+        }
 
     except:
         return {"status": "error", "message": "invalid token"}
+
+
+# =========================
+# NEED SETUP CHECK
+# =========================
+@router.get("/auth/needs-setup")
+def needs_setup(authorization: str = Header(None)):
+
+    if not authorization:
+        return {"status": "error"}
+
+    try:
+        token = authorization.replace("Bearer ", "")
+        data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+
+        player = supabase.table("players") \
+            .select("position") \
+            .eq("discord_id", data["discord_id"]) \
+            .single() \
+            .execute()
+
+        return {
+            "status": "success",
+            "needs_setup": player.data and player.data.get("position") is None
+        }
+
+    except:
+        return {"status": "error"}
 
 
 # =========================
@@ -215,13 +256,12 @@ def increment_view(payload: dict):
     player = supabase.table("players") \
         .select("profile_views") \
         .eq("username", username) \
-        .single() \
         .execute()
-
+    
     if not player.data:
         return {"status": "error"}
-
-    current = player.data.get("profile_views", 0)
+    
+    current = player.data[0].get("profile_views", 0)
 
     supabase.table("players") \
         .update({"profile_views": current + 1}) \
