@@ -63,12 +63,14 @@ def discord_login():
 
 
 # =========================
-# DISCORD CALLBACK (FIXED)
+# DISCORD CALLBACK
 # =========================
 @router.get("/auth/discord/callback")
 def discord_callback(code: str):
 
     try:
+
+        # ================= TOKEN =================
         token_res = requests.post(
             "https://discord.com/api/oauth2/token",
             data={
@@ -78,18 +80,26 @@ def discord_callback(code: str):
                 "code": code,
                 "redirect_uri": DISCORD_REDIRECT_URI,
             },
-            headers={"Content-Type": "application/x-www-form-urlencoded"}
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
         )
 
         token_json = token_res.json()
+
         access_token = token_json.get("access_token")
 
         if not access_token:
-            return RedirectResponse(f"{FRONTEND_URL}/?error=oauth_failed")
+            return RedirectResponse(
+                f"{FRONTEND_URL}/?error=oauth_failed"
+            )
 
+        # ================= USER =================
         user_res = requests.get(
             "https://discord.com/api/users/@me",
-            headers={"Authorization": f"Bearer {access_token}"}
+            headers={
+                "Authorization": f"Bearer {access_token}"
+            }
         )
 
         user = user_res.json()
@@ -99,22 +109,33 @@ def discord_callback(code: str):
         avatar = user.get("avatar")
 
         if not discord_id:
-            return RedirectResponse(f"{FRONTEND_URL}/?error=user_failed")
+            return RedirectResponse(
+                f"{FRONTEND_URL}/?error=user_failed"
+            )
 
-        avatar_url = (
-            f"https://cdn.discordapp.com/avatars/{discord_id}/{avatar}.png"
-            if avatar else None
-        )
+        # ================= DISCORD PFP =================
+        avatar_url = None
 
+        if avatar:
+            avatar_url = (
+                f"https://cdn.discordapp.com/avatars/"
+                f"{discord_id}/{avatar}.png?size=512"
+            )
+
+        # ================= EXISTING PLAYER =================
         existing = supabase.table("players") \
-            .select("discord_id, username, position") \
+            .select("*") \
             .eq("discord_id", discord_id) \
             .execute()
 
         is_new_user = not existing.data
 
+        # ================= CREATE PLAYER =================
         if is_new_user:
-            hmbl_username = f"{username_raw.lower()}_{discord_id[-4:]}"
+
+            hmbl_username = (
+                f"{username_raw.lower()}_{discord_id[-4:]}"
+            )
 
             supabase.table("players").insert({
                 "discord_id": discord_id,
@@ -128,13 +149,27 @@ def discord_callback(code: str):
                 "team_id": None,
                 "position": None
             }).execute()
-        else:
-            hmbl_username = existing.data[0]["username"]
 
+        else:
+
+            existing_player = existing.data[0]
+
+            hmbl_username = existing_player["username"]
+
+            # ALWAYS UPDATE PFP ON LOGIN
+            supabase.table("players") \
+                .update({
+                    "pfp": avatar_url
+                }) \
+                .eq("discord_id", discord_id) \
+                .execute()
+
+        # ================= JWT =================
         token = jwt.encode(
             {
                 "discord_id": discord_id,
                 "username": hmbl_username,
+                "pfp": avatar_url,
                 "is_new": is_new_user,
                 "exp": datetime.utcnow() + timedelta(days=7)
             },
@@ -146,8 +181,12 @@ def discord_callback(code: str):
             f"{FRONTEND_URL}/?token={token}&new={str(is_new_user).lower()}"
         )
 
-    except Exception:
-        return RedirectResponse(f"{FRONTEND_URL}/?error=server_error")
+    except Exception as e:
+        print("DISCORD CALLBACK ERROR:", e)
+
+        return RedirectResponse(
+            f"{FRONTEND_URL}/?error=server_error"
+        )
 
 
 # =========================
@@ -157,13 +196,21 @@ def discord_callback(code: str):
 def get_me(authorization: str = Header(None)):
 
     if not authorization:
-        return {"status": "error", "message": "missing token"}
+        return {
+            "status": "error",
+            "message": "missing token"
+        }
 
     try:
-        token = authorization.replace("Bearer ", "")
-        data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
 
-        # pull full profile from DB (IMPORTANT for profile page)
+        token = authorization.replace("Bearer ", "")
+
+        data = jwt.decode(
+            token,
+            JWT_SECRET,
+            algorithms=["HS256"]
+        )
+
         player = supabase.table("players") \
             .select("*") \
             .eq("discord_id", data["discord_id"]) \
@@ -172,12 +219,19 @@ def get_me(authorization: str = Header(None)):
 
         return {
             "status": "success",
-            "user": data,
-            "profile": player.data
+
+            # IMPORTANT:
+            # frontend should use THIS
+            "user": player.data
         }
 
-    except:
-        return {"status": "error", "message": "invalid token"}
+    except Exception as e:
+        print("AUTH ME ERROR:", e)
+
+        return {
+            "status": "error",
+            "message": "invalid token"
+        }
 
 
 # =========================
@@ -190,8 +244,14 @@ def needs_setup(authorization: str = Header(None)):
         return {"status": "error"}
 
     try:
+
         token = authorization.replace("Bearer ", "")
-        data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+
+        data = jwt.decode(
+            token,
+            JWT_SECRET,
+            algorithms=["HS256"]
+        )
 
         player = supabase.table("players") \
             .select("position") \
@@ -201,7 +261,10 @@ def needs_setup(authorization: str = Header(None)):
 
         return {
             "status": "success",
-            "needs_setup": player.data and player.data.get("position") is None
+            "needs_setup": (
+                player.data and
+                player.data.get("position") is None
+            )
         }
 
     except:
@@ -212,14 +275,26 @@ def needs_setup(authorization: str = Header(None)):
 # UPDATE PROFILE
 # =========================
 @router.post("/players/update-profile")
-def update_profile(payload: dict, authorization: str = Header(None)):
+def update_profile(
+    payload: dict,
+    authorization: str = Header(None)
+):
 
     if not authorization:
-        return {"status": "error", "message": "missing token"}
+        return {
+            "status": "error",
+            "message": "missing token"
+        }
 
     try:
+
         token = authorization.replace("Bearer ", "")
-        data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+
+        data = jwt.decode(
+            token,
+            JWT_SECRET,
+            algorithms=["HS256"]
+        )
 
         discord_id = data["discord_id"]
 
@@ -227,7 +302,10 @@ def update_profile(payload: dict, authorization: str = Header(None)):
         position = payload.get("position")
 
         if not username:
-            return {"status": "error", "message": "missing username"}
+            return {
+                "status": "error",
+                "message": "missing username"
+            }
 
         supabase.table("players") \
             .update({
@@ -239,17 +317,24 @@ def update_profile(payload: dict, authorization: str = Header(None)):
 
         return {"status": "success"}
 
-    except:
-        return {"status": "error", "message": "invalid token"}
+    except Exception as e:
+
+        print("UPDATE PROFILE ERROR:", e)
+
+        return {
+            "status": "error",
+            "message": "invalid token"
+        }
 
 
 # =========================
-# INCREMENT VIEW (OPTIMISED)
+# INCREMENT VIEW
 # =========================
 @router.post("/players/increment-view")
 def increment_view(payload: dict):
 
     username = payload.get("username")
+
     if not username:
         return {"status": "error"}
 
@@ -257,14 +342,19 @@ def increment_view(payload: dict):
         .select("profile_views") \
         .eq("username", username) \
         .execute()
-    
+
     if not player.data:
         return {"status": "error"}
-    
-    current = player.data[0].get("profile_views", 0)
+
+    current = player.data[0].get(
+        "profile_views",
+        0
+    )
 
     supabase.table("players") \
-        .update({"profile_views": current + 1}) \
+        .update({
+            "profile_views": current + 1
+        }) \
         .eq("username", username) \
         .execute()
 
@@ -272,15 +362,21 @@ def increment_view(payload: dict):
 
 
 # =========================
-# GET PLAYERS (FAST)
+# GET PLAYERS
 # =========================
 @router.get("/players")
 def get_players():
-    res = supabase.table("players").select("*").execute()
+
+    res = supabase.table("players") \
+        .select("*") \
+        .execute()
 
     return {
         "status": "success",
-        "data": {str(p["id"]): p for p in (res.data or [])}
+        "data": {
+            str(p["id"]): p
+            for p in (res.data or [])
+        }
     }
 
 
@@ -289,11 +385,17 @@ def get_players():
 # =========================
 @router.get("/teams")
 def get_teams():
-    res = supabase.table("teams").select("*").execute()
+
+    res = supabase.table("teams") \
+        .select("*") \
+        .execute()
 
     return {
         "status": "success",
-        "data": {str(t["id"]): t for t in (res.data or [])}
+        "data": {
+            str(t["id"]): t
+            for t in (res.data or [])
+        }
     }
 
 
@@ -302,11 +404,17 @@ def get_teams():
 # =========================
 @router.get("/divisions")
 def get_divisions():
-    res = supabase.table("divisions").select("*").execute()
+
+    res = supabase.table("divisions") \
+        .select("*") \
+        .execute()
 
     return {
         "status": "success",
-        "data": {d["name"]: d for d in (res.data or [])}
+        "data": {
+            d["name"]: d
+            for d in (res.data or [])
+        }
     }
 
 
@@ -315,178 +423,15 @@ def get_divisions():
 # =========================
 @router.get("/matches")
 def get_matches():
-    res = supabase.table("matches").select("*").execute()
+
+    res = supabase.table("matches") \
+        .select("*") \
+        .execute()
 
     return {
         "status": "success",
-        "data": {str(m["id"]): m for m in (res.data or [])}
-    }
-
-
-# =========================
-# CREATE DIVISION
-# =========================
-@router.post("/divisions/create")
-def create_division(payload: dict):
-
-    name = payload.get("name")
-    max_teams = payload.get("max_teams", 0)
-
-    if not name:
-        return {"status": "error", "message": "Missing name"}
-
-    name = name.upper()
-
-    existing = supabase.table("divisions").select("name").eq("name", name).execute()
-
-    if existing.data:
-        return {"status": "error", "message": "Division exists"}
-
-    all_divs = supabase.table("divisions").select("name").execute().data or []
-    tier = len(all_divs) + 1
-
-    supabase.table("divisions").insert({
-        "name": name,
-        "tier": tier,
-        "max_teams": max_teams,
-        "teams": [],
-        "current_gameweek": 1,
-        "fixtures": {}
-    }).execute()
-
-    return {"status": "success", "message": "Division created"}
-
-
-# =========================
-# DELETE DIVISION
-# =========================
-@router.post("/divisions/delete")
-def delete_division(payload: dict):
-
-    name = payload.get("name")
-
-    if not name:
-        return {"status": "error", "message": "Missing name"}
-
-    name = name.upper()
-
-    supabase.table("divisions").delete().eq("name", name).execute()
-
-    return {"status": "success", "message": "Deleted"}
-
-
-# =========================
-# UPDATE DIVISION
-# =========================
-@router.post("/divisions/update")
-def update_division(payload: dict):
-
-    name = payload.get("division")
-    data = payload.get("data")
-
-    if not name or not data:
-        return {"status": "error", "message": "Missing fields"}
-
-    name = name.upper()
-
-    allowed_fields = ["tier", "max_teams", "teams", "current_gameweek", "fixtures"]
-
-    update_data = {}
-    for field in allowed_fields:
-        if field in data:
-            update_data[field] = data[field]
-
-    if not update_data:
-        return {"status": "error", "message": "No valid fields"}
-
-    supabase.table("divisions").update(update_data).eq("name", name).execute()
-
-    return {"status": "success", "message": "Updated"}
-
-
-# =========================
-# CREATE TEAM
-# =========================
-@router.post("/teams/create")
-def create_team(payload: dict):
-
-    name = payload.get("name")
-    division = payload.get("division")
-    manager = payload.get("manager")
-    color = payload.get("color", 0xf39c12)
-
-    if not all([name, division, manager]):
-        return {"status": "error", "message": "Missing fields"}
-
-    division = division.upper()
-
-    insert_res = supabase.table("teams").insert({
-        "name": name,
-        "division": division,
-        "manager": manager,
-        "co_managers": [],
-        "color": color,
-        "stats": {
-            "played": 0,
-            "wins": 0,
-            "draws": 0,
-            "losses": 0,
-            "gf": 0,
-            "ga": 0,
-            "gd": 0,
-            "points": 0
+        "data": {
+            str(m["id"]): m
+            for m in (res.data or [])
         }
-    }).execute()
-
-    team_id = str(insert_res.data[0]["id"])
-
-    div_res = supabase.table("divisions").select("*").eq("name", division).execute()
-
-    if div_res.data:
-        teams = div_res.data[0].get("teams", [])
-        if team_id not in teams:
-            teams.append(team_id)
-
-        supabase.table("divisions") \
-            .update({"teams": teams}) \
-            .eq("name", division) \
-            .execute()
-
-    return {"status": "success", "team_id": team_id}
-
-
-# =========================
-# DELETE TEAM
-# =========================
-@router.post("/teams/delete")
-def delete_team(payload: dict):
-
-    team_id = payload.get("team_id")
-
-    if not team_id:
-        return {"status": "error", "message": "Missing team_id"}
-
-    team_res = supabase.table("teams").select("*").eq("id", team_id).execute()
-
-    if not team_res.data:
-        return {"status": "error", "message": "Not found"}
-
-    team = team_res.data[0]
-    division = team["division"].upper()
-
-    div_res = supabase.table("divisions").select("*").eq("name", division).execute()
-
-    if div_res.data:
-        teams = div_res.data[0].get("teams", [])
-
-        if str(team_id) in teams:
-            teams.remove(str(team_id))
-
-        supabase.table("divisions") \
-            .update({"teams": teams}) \
-            .eq("name", division) \
-            .execute()
-
-    supabase.table("teams").delete().eq("id", team_id).execute()
-
-    return {"status": "success", "message": "Deleted"}
+    }
