@@ -2,6 +2,10 @@ from fastapi import APIRouter
 from supabase import create_client
 from dotenv import load_dotenv
 import os
+import requests
+import jwt
+from datetime import datetime, timedelta
+from fastapi import Request
 
 load_dotenv()
 
@@ -14,6 +18,11 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID")
+DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET")
+DISCORD_REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI")
+JWT_SECRET = os.getenv("JWT_SECRET")
 
 
 # =========================
@@ -36,6 +45,124 @@ def debug():
         "url": SUPABASE_URL,
         "key_ok": bool(SUPABASE_KEY)
     }
+
+# =========================
+# DISCORD LOGIN 
+# =========================
+@router.get("/auth/discord/login")
+def discord_login():
+    url = (
+        "https://discord.com/api/oauth2/authorize"
+        f"?client_id={DISCORD_CLIENT_ID}"
+        "&response_type=code"
+        "&scope=identify"
+        f"&redirect_uri={DISCORD_REDIRECT_URI}"
+    )
+
+    return {"url": url}
+
+# =========================
+# DISCORD CALLBACK
+# =========================
+@router.get("/auth/discord/callback")
+def discord_callback(code: str):
+
+    # exchange code for token
+    token_data = {
+        "client_id": DISCORD_CLIENT_ID,
+        "client_secret": DISCORD_CLIENT_SECRET,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": DISCORD_REDIRECT_URI,
+        "scope": "identify"
+    }
+
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+    token_res = requests.post(
+        "https://discord.com/api/oauth2/token",
+        data=token_data,
+        headers=headers
+    )
+
+    token_json = token_res.json()
+    access_token = token_json.get("access_token")
+
+    if not access_token:
+        return {"status": "error", "message": "No access token"}
+
+    # get discord user
+    user_res = requests.get(
+        "https://discord.com/api/users/@me",
+        headers={"Authorization": f"Bearer {access_token}"}
+    )
+
+    user = user_res.json()
+
+    discord_id = user["id"]
+    username_raw = user["username"]
+    avatar = user.get("avatar")
+
+    avatar_url = (
+        f"https://cdn.discordapp.com/avatars/{discord_id}/{avatar}.png"
+        if avatar else None
+    )
+
+    # check if player exists
+    existing = supabase.table("players") \
+        .select("*") \
+        .eq("discord_id", discord_id) \
+        .execute()
+
+    if not existing.data:
+
+        # create HMBL username (first login system)
+        hmbl_username = f"{username_raw.lower()}_{discord_id[-4:]}"
+
+        supabase.table("players").insert({
+            "discord_id": discord_id,
+            "username": hmbl_username,
+            "pfp": avatar_url,
+            "team_id": None,
+            "position": None
+        }).execute()
+
+    else:
+        hmbl_username = existing.data[0]["username"]
+
+    # create JWT session
+    token = jwt.encode(
+        {
+            "discord_id": discord_id,
+            "username": hmbl_username,
+            "exp": datetime.utcnow() + timedelta(days=7)
+        },
+        JWT_SECRET,
+        algorithm="HS256"
+    )
+
+    return {
+        "status": "success",
+        "token": token,
+        "user": {
+            "discord_id": discord_id,
+            "username": hmbl_username,
+            "avatar": avatar_url
+        }
+    }
+
+# =========================
+# DISCORD LOGIN CHECK
+# =========================
+@router.get("/auth/me")
+def get_me(token: str):
+
+    try:
+        data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return {"status": "success", "user": data}
+
+    except:
+        return {"status": "error", "message": "invalid token"}
 
 
 # =========================
@@ -269,5 +396,6 @@ def delete_team(payload: dict):
         }).eq("name", division).execute()
 
     supabase.table("teams").delete().eq("id", team_id).execute()
+
 
     return {"status": "success", "message": "Deleted"}
