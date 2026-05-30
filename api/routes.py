@@ -308,8 +308,11 @@ def update_profile(payload: dict, authorization: str = Header(None)):
         return {"status": "success"}
 
     except Exception as e:
-        print("UPDATE PROFILE ERROR:", e)
-        return {"status": "error", "message": "invalid token"}
+        print("UPDATE PROFILE ERROR:", repr(e))
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 
 # =========================
