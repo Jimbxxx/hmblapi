@@ -292,6 +292,10 @@ def update_profile(payload: dict, authorization: str = Header(None)):
         country = payload.get("country")
         music = payload.get("music")
 
+        twitter = payload.get("twitter")
+        instagram = payload.get("instagram")
+        tiktok = payload.get("tiktok")
+
         if not username:
             return {"status": "error", "message": "missing username"}
 
@@ -299,9 +303,9 @@ def update_profile(payload: dict, authorization: str = Header(None)):
             "username": username,
             "position": position,
             "country": country,
-            "twitter": socials.get("twitter") if socials else None,
-            "instagram": socials.get("instagram") if socials else None,
-            "tiktok": socials.get("tiktok") if socials else None,
+            "twitter": twitter,
+            "instagram": instagram,
+            "tiktok": tiktok,
             "music": music
         }).eq("discord_id", discord_id).execute()
 
