@@ -6,6 +6,7 @@ import requests
 import jwt
 from datetime import datetime, timedelta
 from fastapi.responses import RedirectResponse
+import base64
 
 load_dotenv()
 
@@ -23,8 +24,28 @@ DISCORD_REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI")
 JWT_SECRET = os.getenv("JWT_SECRET")
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
+
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+def get_spotify_token():
+    auth = base64.b64encode(
+        f"{SPOTIFY_CLIENT_ID}:{SPOTIFY_CLIENT_SECRET}".encode()
+    ).decode()
+
+    res = requests.post(
+        "https://accounts.spotify.com/api/token",
+        headers={
+            "Authorization": f"Basic {auth}",
+            "Content-Type": "application/x-www-form-urlencoded"
+        },
+        data={
+            "grant_type": "client_credentials"
+        }
+    )
+
+    return res.json().get("access_token")
 
 # =========================
 # HEALTH CHECK
@@ -427,3 +448,41 @@ def get_matches():
             for m in (res.data or [])
         }
     }
+
+
+# =========================
+# SPOTIFY TRACK
+# =========================
+@router.post("/spotify-track")
+def spotify_track(payload: dict):
+
+    url = payload.get("url")
+
+    if not url:
+        return {"status": "error", "message": "missing url"}
+
+    try:
+        track_id = url.split("/track/")[1].split("?")[0]
+
+        token = get_spotify_token()
+
+        res = requests.get(
+            f"https://api.spotify.com/v1/tracks/{track_id}",
+            headers={
+                "Authorization": f"Bearer {token}"
+            }
+        )
+
+        track = res.json()
+
+        return {
+            "status": "success",
+            "name": track["name"],
+            "artist": track["artists"][0]["name"],
+            "cover": track["album"]["images"][0]["url"],
+            "duration": track["duration_ms"]
+        }
+
+    except Exception as e:
+        print("SPOTIFY ERROR:", repr(e))
+        return {"status": "error", "message": "failed to fetch track"}
