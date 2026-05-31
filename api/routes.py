@@ -458,13 +458,16 @@ def spotify_track(payload: dict):
 
     url = payload.get("url")
 
-    if not url:
-        return {"status": "error", "message": "missing url"}
+    if not url or "/track/" not in url:
+        return {"status": "error", "message": "invalid url"}
 
     try:
         track_id = url.split("/track/")[1].split("?")[0]
 
         token = get_spotify_token()
+
+        if not token:
+            return {"status": "error", "message": "spotify auth failed"}
 
         res = requests.get(
             f"https://api.spotify.com/v1/tracks/{track_id}",
@@ -473,14 +476,34 @@ def spotify_track(payload: dict):
             }
         )
 
+        if res.status_code != 200:
+            return {"status": "error", "message": "track not found"}
+
         track = res.json()
 
         return {
             "status": "success",
-            "name": track["name"],
-            "artist": track["artists"][0]["name"],
-            "cover": track["album"]["images"][0]["url"],
-            "duration": track["duration_ms"]
+
+            "track": {
+                "name": track.get("name"),
+                "id": track.get("id"),
+
+                "artist": ", ".join(
+                    a["name"] for a in track.get("artists", [])
+                ),
+
+                "album": track.get("album", {}).get("name"),
+
+                "cover": track.get("album", {})
+                    .get("images", [{}])[0]
+                    .get("url"),
+
+                "preview": track.get("preview_url"),
+
+                "duration_ms": track.get("duration_ms"),
+
+                "spotify_url": track.get("external_urls", {}).get("spotify")
+            }
         }
 
     except Exception as e:
