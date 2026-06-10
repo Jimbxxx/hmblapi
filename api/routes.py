@@ -54,6 +54,10 @@ def get_spotify_token():
 def home():
     return {"name": "HMBL API", "status": "online"}
 
+@router.get("/ping")
+async def ping():
+    return {"status": "ok"}
+
 
 # =========================
 # DEBUG
