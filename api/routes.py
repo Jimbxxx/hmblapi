@@ -520,40 +520,20 @@ def spotify_track(payload: dict):
 def check_role(payload: dict, authorization: str = Header(None)):
 
     if not authorization:
-        return {"status": "error", "message": "missing token"}
+        return {"status": "error"}
 
     try:
         token = authorization.replace("Bearer ", "")
         data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
 
-        discord_id = data["discord_id"]
-        required_role = payload.get("role")
+        discord_id = int(data["discord_id"])
+        panel = payload.get("panel")  # staff/admin/overseer/owner
 
-        if not required_role:
-            return {"status": "error", "message": "missing role"}
-
-        # Discord API call (no bot needed yet)
-        headers = {
-            "Authorization": f"Bot {os.getenv('DISCORD_BOT_TOKEN')}"
-        }
-
-        res = requests.get(
-            f"https://discord.com/api/guilds/{os.getenv('DISCORD_GUILD_ID')}/members/{discord_id}",
-            headers=headers
-        )
-
-        if res.status_code != 200:
-            return {"status": "error", "message": "member not found"}
-
-        member = res.json()
-
-        roles = member.get("roles", [])
-
-        has_role = required_role in roles
+        result = api_check_role(discord_id, panel, GUILD_ID)
 
         return {
             "status": "success",
-            "allowed": has_role
+            "allowed": result["allowed"]
         }
 
     except Exception as e:
