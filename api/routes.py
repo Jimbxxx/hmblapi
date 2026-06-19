@@ -9,7 +9,7 @@ from fastapi.responses import RedirectResponse
 import base64
 import requests
 
-GUILD_ID = int(os.getenv("GUILD_ID"))
+GUILD_ID = os.getenv("GUILD_ID")
 DISCORD_BOT_TOKEN = os.getenv("TOKEN")
 
 load_dotenv()
