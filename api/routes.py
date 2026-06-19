@@ -7,6 +7,9 @@ import jwt
 from datetime import datetime, timedelta
 from fastapi.responses import RedirectResponse
 import base64
+import requests
+
+DISCORD_BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 load_dotenv()
 
