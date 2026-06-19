@@ -196,7 +196,7 @@ def discord_callback(code: str):
                 "username": hmbl_username,
                 "pfp": avatar_url,
                 "is_new": is_new_user,
-                "exp": datetime.utcnow() + timedelta(days=7)
+                "exp": datetime.utcnow() + timedelta(days=30)
             },
             JWT_SECRET,
             algorithm="HS256"
