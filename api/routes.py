@@ -523,13 +523,44 @@ def check_role(payload: dict, authorization: str = Header(None)):
     data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
 
     discord_id = data["discord_id"]
+    panel = payload.get("panel")
 
-    res = requests.post(
-        "http://localhost:8001/bot/check-role",
-        json={
-            "discord_id": discord_id,
-            "panel": payload.get("panel")
+    # GET MEMBER FROM DISCORD API
+    res = requests.get(
+        f"https://discord.com/api/guilds/{GUILD_ID}/members/{discord_id}",
+        headers={
+            "Authorization": f"Bot {DISCORD_BOT_TOKEN}"
         }
     )
 
-    return res.json()
+    if res.status_code != 200:
+        return {"allowed": False}
+
+    member = res.json()
+    roles = member.get("roles", [])
+
+    # ROLE IDS
+    STAFF_ROLE = "1483922965329346660"
+    ADMIN_ROLE = "1467629210712543365"
+    OVERSEER_ROLE = "1468708372634407079"
+    OWNER_ROLES = ["1482046938688913538", "1461835070926225509"]
+    OWNERSHIP_ROLE = "1473787179020058837"
+
+    # OWNER OVERRIDE
+    if OWNERSHIP_ROLE in roles:
+        return {"allowed": True}
+
+    # PANEL CHECKS
+    if panel == "staff":
+        return {"allowed": STAFF_ROLE in roles}
+
+    if panel == "admin":
+        return {"allowed": ADMIN_ROLE in roles or any(r in roles for r in OWNER_ROLES)}
+
+    if panel == "overseer":
+        return {"allowed": OVERSEER_ROLE in roles or ADMIN_ROLE in roles}
+
+    if panel == "owner":
+        return {"allowed": any(r in roles for r in OWNER_ROLES)}
+
+    return {"allowed": False}
