@@ -519,23 +519,17 @@ def spotify_track(payload: dict):
 @router.post("/auth/check-role")
 def check_role(payload: dict, authorization: str = Header(None)):
 
-    if not authorization:
-        return {"status": "error"}
+    token = authorization.replace("Bearer ", "")
+    data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
 
-    try:
-        token = authorization.replace("Bearer ", "")
-        data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    discord_id = data["discord_id"]
 
-        discord_id = int(data["discord_id"])
-        panel = payload.get("panel")  # staff/admin/overseer/owner
-
-        result = api_check_role(discord_id, panel, GUILD_ID)
-
-        return {
-            "status": "success",
-            "allowed": result["allowed"]
+    res = requests.post(
+        "http://localhost:8001/bot/check-role",
+        json={
+            "discord_id": discord_id,
+            "panel": payload.get("panel")
         }
+    )
 
-    except Exception as e:
-        print("ROLE CHECK ERROR:", e)
-        return {"status": "error"}
+    return res.json()
